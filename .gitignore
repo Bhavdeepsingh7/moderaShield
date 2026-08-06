@@ -115,3 +115,6 @@ alembic/versions/__pycache__/
 # ===========================
 *.sqlite3
 *.db
+
+.editorconfig
+.pre-commit-config.yaml

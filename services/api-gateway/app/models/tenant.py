@@ -1,6 +1,7 @@
 import uuid
 
 from sqlalchemy import String
+from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 
@@ -11,7 +12,7 @@ class Tenant(Base, TimeStampMixin):
     __tablename__ = "tenants"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        uuid.UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default = uuid.uuid4
     )
