@@ -1,11 +1,12 @@
 from pydantic import BaseModel
+from uuid import UUID
 
 class TenantCreate(BaseModel):
     name: str
     slug: str
 
 class TenantResponse(BaseModel):
-    id: str
+    id: UUID
     name: str
     slug: str
     plan: str
