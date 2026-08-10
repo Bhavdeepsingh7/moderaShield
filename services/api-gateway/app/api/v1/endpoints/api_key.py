@@ -6,8 +6,8 @@ from app.dependencies.database import get_db
 from app.schemas.api_key import ApiKeyCreate, ApiKeyCreatedResponse
 from app.services.api_key_service import api_key_service
 from app.models.api_key import ApiKey
-from app.dependencies.auth import get_current_api_key
-
+from app.dependencies.auth import get_current_api_key, get_current_tenant
+from app.models.tenant import Tenant
 router = APIRouter()
 
 @router.post(
@@ -52,3 +52,16 @@ def verify_api_key(
         "api_key_id": str(api_key.id),
         "tenant_id": str(api_key.tenant_id),
     }
+
+
+@router.get("/verify-tenant")
+def verify_tenant(
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    return {
+        "message": "Tenant authenticated",
+        "tenant_id": str(tenant.id),
+        "tenant_name": tenant.name,
+        "tenant_slug": tenant.slug,
+        "tenant_status": tenant.status,
+            }
