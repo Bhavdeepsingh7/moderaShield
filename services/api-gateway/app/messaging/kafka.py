@@ -1,4 +1,4 @@
-from aiokafka import AIOKafkaProducer
+from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import json
 from app.core.config import settings
 from app.messaging.events import ModerationRequestEvent
@@ -41,6 +41,20 @@ async def publish_moderation_request(
         key=key,
         value=value,
     )
+
+
+async def create_consumer(topic: str, group_id: str):
+    consumer = AIOKafkaConsumer(
+        topic,
+        bootstrap_servers= settings.KAFKA_BOOTSTRAP_SERVERS,
+        group_id=group_id,
+        auto_offset_reset ="earliest",
+        enable_auto_commit=False,
+    )
+
+    await consumer.start()
+
+    return consumer
     
 
     

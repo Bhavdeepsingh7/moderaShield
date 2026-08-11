@@ -19,7 +19,7 @@ async def create_moderation_request(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    return await moderation_service.create_request(
+    return moderation_service.create_request(
         db,
         tenant,
         data,
