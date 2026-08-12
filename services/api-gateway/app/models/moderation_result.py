@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Float, String, Uuid
+from sqlalchemy import Float, String, Uuid, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -19,6 +19,7 @@ class ModerationResult(Base, TimeStampMixin):
         Uuid,
         nullable=False,
         index=True,
+        unique=True,
     )
 
     is_flagged: Mapped[bool] = mapped_column(
@@ -39,4 +40,16 @@ class ModerationResult(Base, TimeStampMixin):
         String(100),
         nullable=False,
         default="rule-based-v1",
+    )
+
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable= True,
     )

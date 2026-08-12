@@ -18,6 +18,9 @@ async def process_message(message):
 
     db = SessionLocal()
 
+    moderation_request = None
+    MAX_RETRIES = 3
+
     try:
         moderation_request = db.scalar(
             select(ModerationRequest).where(
@@ -33,9 +36,35 @@ async def process_message(message):
             print(f"Request {request_id} already processed")
             return 
 
+        moderation_request.status = "processing"
+        db.commit()
+
         print(f"Processing moderation request: {request_id}")
 
+        existing_result = db.scalar(
+            select(ModerationResult).where(
+                ModerationResult.request_id == moderation_request.id
+            )
+        )
+
+        if existing_result is not None:
+            print(f"Request {request_id} already has a moderation result")
+
+            if moderation_request.status not in ("approved", "flagged"):
+                moderation_request.status =(
+                    "flagged"
+                    if existing_result.is_flagged
+                    else "approved"
+                )
+
+                db.commit()
+
+            return 
+
         content = moderation_request.content
+
+        if content == "crash":
+            raise Exception("Simulated moderation failure")
 
         result = moderation_engine.moderate(content)
 
@@ -62,9 +91,31 @@ async def process_message(message):
             f"category={result.category}"
             )
 
-    except Exception:
+    except Exception as e:
         db.rollback()
+
+        if moderation_request is not None:
+            try:
+                moderation_request.retry_count += 1
+
+                moderation_request.last_error = str(e)
+
+                if moderation_request.retry_count >= MAX_RETRIES:
+                    moderation_request.status = "failed"
+                else:
+                    moderation_request.status = "pending"
+
+                db.commit()
+
+            except Exception:
+                db.rollback()
+
+        print(
+            f"Failed to process request {request_id}: {e}"
+        )
+
         raise
+
     finally:
         db.close()
 

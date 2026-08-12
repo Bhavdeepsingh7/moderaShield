@@ -55,6 +55,16 @@ async def create_consumer(topic: str, group_id: str):
     await consumer.start()
 
     return consumer
+
+
+async def publish(topic: str, payload: dict) -> None:
+    if kafka_producer is None:
+        raise RuntimeError("Kafka producer is not initialized")
+
+    await kafka_producer.send_and_wait(
+        topic,
+        value=json.dumps(payload).encode("utf-8"),
+    )
     
 
     
