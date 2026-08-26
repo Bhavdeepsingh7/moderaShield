@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import tenant, api_key, moderation
+from app.api.v1.endpoints import api_key, metrics, moderation, tenant
 
 router = APIRouter()
 
@@ -20,4 +20,10 @@ router.include_router(
     moderation.router,
     prefix="/moderate",
     tags=["Moderation"]
+)
+
+router.include_router(
+    metrics.router,
+    prefix="/metrics",
+    tags=["Metrics"],
 )

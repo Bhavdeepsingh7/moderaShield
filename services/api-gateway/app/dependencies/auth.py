@@ -1,7 +1,5 @@
-from datetime import datetime, timezone
-
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_api_key
@@ -12,15 +10,18 @@ from app.repositories.api_key_repository import api_key_repository
 from app.repositories.tenant_repository import tenant_repository
 
 
-security = HTTPBearer()
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 def get_current_api_key(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+        raw_key: str | None = Depends(api_key_header),
         db: Session =  Depends(get_db),
 
 ) -> ApiKey:
-
-    raw_key = credentials.credentials
+    if not raw_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-API-Key",
+        )
 
     if not raw_key.startswith("msk_"):
         raise HTTPException(
