@@ -7,6 +7,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from aiokafka.errors import CommitFailedError
 
 import app.messaging.kafka as kafka
 from app.db.session import SessionLocal
@@ -69,7 +70,10 @@ async def process_message(message) -> None:
             content = request.content
 
         try:
-            result = _predict(content)
+            # Transformer inference is synchronous and can block for long
+            # enough to starve aiokafka heartbeats during cold model loading.
+            # Run it off the event loop while retaining the same model call.
+            result = await asyncio.to_thread(_predict, content)
         except Exception as error:
             with db.begin():
                 request = db.scalar(
@@ -88,7 +92,9 @@ async def process_message(message) -> None:
                     return
 
                 request.retry_count += 1
-                request.last_error = str(error)
+                # Some built-in errors (notably MemoryError) stringify to an
+                # empty string. Persist a useful deterministic diagnostic.
+                request.last_error = str(error) or error.__class__.__name__
                 if request.retry_count >= MAX_RETRIES:
                     request.status = "failed"
                     logger.exception("Moderation request %s failed permanently", request_id)
@@ -154,6 +160,11 @@ async def main() -> None:
     consumer = await kafka.create_consumer(
         MODERATION_REQUESTS_TOPIC,
         group_id="moderation-worker",
+        # Model initialization can take longer than Kafka's default poll
+        # interval on a cold worker. Process one record at a time and retain
+        # manual commits after the database transaction.
+        max_poll_interval_ms=900_000,
+        max_poll_records=1,
     )
     try:
         async for message in consumer:
@@ -166,7 +177,12 @@ async def main() -> None:
             except Exception:
                 logger.exception("Unexpected worker failure; leaving message uncommitted")
                 continue
-            await consumer.commit()
+            try:
+                await consumer.commit()
+            except CommitFailedError:
+                # The record remains uncommitted and will be redelivered after
+                # the consumer rejoins; do not terminate this worker.
+                logger.warning("Kafka commit failed after processing; record remains uncommitted", exc_info=True)
     finally:
         await consumer.stop()
 

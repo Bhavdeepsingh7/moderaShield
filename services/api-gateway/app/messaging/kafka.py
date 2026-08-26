@@ -78,7 +78,7 @@ async def publish_moderation_request(
     )
 
 
-async def create_consumer(topic: str, group_id: str):
+async def create_consumer(topic: str, group_id: str, **consumer_options):
     if topic == MODERATION_REQUESTS_TOPIC:
         await ensure_moderation_requests_topic()
 
@@ -88,6 +88,7 @@ async def create_consumer(topic: str, group_id: str):
         group_id=group_id,
         auto_offset_reset ="earliest",
         enable_auto_commit=False,
+        **consumer_options,
     )
 
     await consumer.start()
