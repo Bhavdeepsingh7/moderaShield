@@ -1,5 +1,6 @@
 import uuid
-from sqlalchemy import String , Text, Uuid
+
+from sqlalchemy import Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped , mapped_column
 
 from app.db.base import Base
@@ -37,3 +38,13 @@ class ModerationRequest(Base, TimeStampMixin):
         nullable=False,
         default = "pending",
     )
+
+    # A failed request has no result, so retry state belongs to the request.
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

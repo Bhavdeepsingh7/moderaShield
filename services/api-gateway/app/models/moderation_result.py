@@ -1,7 +1,8 @@
 import uuid
 
-from sqlalchemy import Float, String, Uuid, Integer, Text
+from sqlalchemy import String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON
 
 from app.db.base import Base
 from app.models.base import TimeStampMixin
@@ -26,30 +27,20 @@ class ModerationResult(Base, TimeStampMixin):
         nullable=False,
     )
 
-    category: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
+    category: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default = list,
     )
 
-    score: Mapped[float] = mapped_column(
-        Float,
+    score: Mapped[dict[str, float]] = mapped_column(
+        JSON,
         nullable=False,
+        default= dict,
     )
 
     model: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         default="rule-based-v1",
-    )
-
-    retry_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default="0",
-    )
-
-    last_error: Mapped[str | None] = mapped_column(
-        Text,
-        nullable= True,
     )
