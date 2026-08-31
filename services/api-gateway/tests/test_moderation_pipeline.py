@@ -24,6 +24,17 @@ from app.models.tenant import Tenant
 from app.workers import moderation_worker
 
 
+class FakeInferenceService:
+    def __init__(self, predict_fn):
+        self.predict_fn = predict_fn
+
+    def moderate(self, content):
+        result = self.predict_fn(content)
+        if "model" not in result:
+            result = {**result, "model": "test-model"}
+        return result
+
+
 class Message:
     def __init__(self, request_id):
         self.value = json.dumps({"request_id": str(request_id)}).encode()
@@ -55,7 +66,8 @@ def test_successful_moderation_and_duplicate_message(session_factory, monkeypatc
         calls += 1
         return {"is_flagged": True, "categories": ["toxic"], "scores": {"toxic": 0.9}}
 
-    monkeypatch.setattr(moderation_worker, "_predict", predict)
+    fake_service = FakeInferenceService(predict)
+    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
     asyncio.run(moderation_worker.process_message(Message(request.id)))
     asyncio.run(moderation_worker.process_message(Message(request.id)))
 
@@ -77,7 +89,8 @@ def test_failed_attempt_is_persisted_then_can_succeed(session_factory, monkeypat
             raise outcome
         return outcome
 
-    monkeypatch.setattr(moderation_worker, "_predict", predict)
+    fake_service = FakeInferenceService(predict)
+    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
     with pytest.raises(moderation_worker.RetriableProcessingError):
         asyncio.run(moderation_worker.process_message(Message(request.id)))
     with session_factory() as db:
@@ -92,7 +105,8 @@ def test_failed_attempt_is_persisted_then_can_succeed(session_factory, monkeypat
 
 def test_final_failure_is_terminal_and_creates_no_result(session_factory, monkeypatch):
     request = add_request(session_factory)
-    monkeypatch.setattr(moderation_worker, "_predict", lambda _content: (_ for _ in ()).throw(RuntimeError("model unavailable")))
+    fake_service = FakeInferenceService(lambda _content: (_ for _ in ()).throw(RuntimeError("model unavailable")))
+    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
 
     for _ in range(moderation_worker.MAX_RETRIES - 1):
         with pytest.raises(moderation_worker.RetriableProcessingError):

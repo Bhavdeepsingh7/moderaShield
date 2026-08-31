@@ -29,7 +29,7 @@ export default function DocsPage() {
     { id: "python-sdk", title: "Python SDK" },
     { id: "errors", title: "Error Handling" },
     { id: "limits", title: "Rate Limits" },
-    { id: "webhooks", title: "Webhooks (Coming Soon)" }
+    { id: "webhooks", title: "Webhooks" }
   ];
 
   return (
@@ -86,9 +86,6 @@ export default function DocsPage() {
                   }`}
                 >
                   <span>{item.title}</span>
-                  {item.id === "webhooks" && (
-                    <span className="text-[8px] bg-slate-900 border border-border-dark text-slate-500 px-1 rounded">Soon</span>
-                  )}
                 </button>
               ))}
             </nav>
@@ -342,6 +339,107 @@ else:
               <div className="bg-card-dark border border-border-dark p-3 rounded-lg">
                 <span className="text-slate-500 font-bold block">Enterprise Plan</span>
                 <span className="text-white text-base font-extrabold mt-1 block">Custom SLA</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Webhooks Section */}
+          <section id="webhooks" className="space-y-4 scroll-mt-20">
+            <h2 className="text-xl font-bold font-outfit text-white flex items-center gap-2">
+              <Zap className="h-5 w-5 text-brand-purple" />
+              <span>Webhooks</span>
+            </h2>
+            <p className="text-slate-400 font-inter text-xs leading-relaxed">
+              Configure webhooks to receive real-time HTTP POST notifications on your server when a moderation request finishes processing (succeeds or fails).
+            </p>
+
+            <div className="space-y-3 font-inter text-xs">
+              <p className="font-semibold text-slate-300">HTTP Headers sent to your server</p>
+              <table className="w-full text-left border-collapse border border-border-dark rounded-lg overflow-hidden font-inter">
+                <thead>
+                  <tr className="bg-slate-900 border-b border-border-dark text-slate-400 text-[10px] uppercase font-bold">
+                    <th className="p-2.5">Header</th>
+                    <th className="p-2.5">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-dark/60 text-slate-300">
+                  <tr>
+                    <td className="p-2.5 font-mono text-brand-purple">X-ModeraShield-Event-ID</td>
+                    <td className="p-2.5">A unique UUID representing this event delivery task. Customers should use this ID to deduplicate deliveries and ensure idempotency.</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5 font-mono text-brand-purple">X-ModeraShield-Signature</td>
+                    <td className="p-2.5">Hex-encoded HMAC-SHA256 signature generated using the webhook secret over the raw HTTP request body bytes.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-slate-300 font-inter">Payload Formats</p>
+              
+              <div className="bg-card-dark border border-border-dark rounded-xl overflow-hidden font-mono text-xs">
+                <div className="bg-slate-900 px-4 py-2 border-b border-border-dark text-slate-400">
+                  moderation.completed Event Payload
+                </div>
+                <pre className="p-4 bg-slate-950/40 text-slate-300 leading-relaxed overflow-x-auto">
+{`{
+  "event": "moderation.completed",
+  "request_id": "82f7c229-3739-44b4-82ee-c1c5cb5a799a",
+  "status": "flagged",
+  "is_flagged": true,
+  "categories": ["toxic"],
+  "scores": {
+    "toxic": 0.92
+  },
+  "model": "moderashield-text-v1"
+}`}
+                </pre>
+              </div>
+
+              <div className="bg-card-dark border border-border-dark rounded-xl overflow-hidden font-mono text-xs">
+                <div className="bg-slate-900 px-4 py-2 border-b border-border-dark text-slate-400">
+                  moderation.failed Event Payload
+                </div>
+                <pre className="p-4 bg-slate-950/40 text-slate-300 leading-relaxed overflow-x-auto">
+{`{
+  "event": "moderation.failed",
+  "request_id": "82f7c229-3739-44b4-82ee-c1c5cb5a799a",
+  "status": "failed"
+}`}
+                </pre>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-slate-300 font-inter">Signature Verification Code (Python)</p>
+              <p className="text-slate-400 font-inter text-xs leading-relaxed">
+                To verify that a request was sent by ModeraShield and not tampered with, compute the HMAC-SHA256 signature using your webhook secret and verify it using constant-time comparison:
+              </p>
+              
+              <div className="bg-card-dark border border-border-dark rounded-xl overflow-hidden font-mono text-xs">
+                <div className="bg-slate-900 px-4 py-2 border-b border-border-dark text-slate-400">
+                  Python Flask / FastAPI signature check
+                </div>
+                <pre className="p-4 bg-slate-950/40 text-slate-300 leading-relaxed overflow-x-auto">
+{`import hmac
+import hashlib
+
+def verify_signature(raw_payload: bytes, signature_header: str, secret: str) -> bool:
+    """
+    raw_payload: Raw request body bytes (do not parse or format json before)
+    signature_header: The value of X-ModeraShield-Signature header
+    secret: The webhook secret generated in the dashboard
+    """
+    computed = hmac.new(
+        secret.encode('utf-8'),
+        raw_payload,
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(computed, signature_header)
+`}
+                </pre>
               </div>
             </div>
           </section>

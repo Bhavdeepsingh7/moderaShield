@@ -14,7 +14,8 @@ from app.db.session import SessionLocal
 from app.messaging.topics import MODERATION_REQUESTS_TOPIC
 from app.models.moderation import ModerationRequest
 from app.models.moderation_result import ModerationResult
-
+from app.services.webhook_service import create_deliveries_for_request
+from app.services.inference.registry import get_inference_service
 
 logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
@@ -22,13 +23,6 @@ MAX_RETRIES = 3
 
 class RetriableProcessingError(Exception):
     """Signals that the Kafka offset must remain uncommitted."""
-
-
-def _predict(content: str) -> dict:
-    # Avoid loading the text model until the worker has text work to process.
-    from app.moderation.ml_engine import predict
-
-    return predict(content)
 
 
 def _set_completed_status(request: ModerationRequest, result: ModerationResult) -> None:
@@ -62,18 +56,23 @@ async def process_message(message) -> None:
             )
             if existing is not None:
                 _set_completed_status(request, existing)
+                create_deliveries_for_request(db, request, existing)
                 return
             if request.status == "failed":
+                create_deliveries_for_request(db, request, None)
                 return
 
             request.status = "processing"
+            content_type = request.content_type
             content = request.content
 
         try:
             # Transformer inference is synchronous and can block for long
             # enough to starve aiokafka heartbeats during cold model loading.
             # Run it off the event loop while retaining the same model call.
-            result = await asyncio.to_thread(_predict, content)
+            inference_service = get_inference_service(content_type)
+
+            result = await asyncio.to_thread(inference_service.moderate, content,)
         except Exception as error:
             with db.begin():
                 request = db.scalar(
@@ -89,6 +88,7 @@ async def process_message(message) -> None:
                 )
                 if existing is not None:
                     _set_completed_status(request, existing)
+                    create_deliveries_for_request(db, request, existing)
                     return
 
                 request.retry_count += 1
@@ -98,6 +98,7 @@ async def process_message(message) -> None:
                 if request.retry_count >= MAX_RETRIES:
                     request.status = "failed"
                     logger.exception("Moderation request %s failed permanently", request_id)
+                    create_deliveries_for_request(db, request, None)
                     return
                 request.status = "pending"
                 retry_count = request.retry_count
@@ -122,8 +123,10 @@ async def process_message(message) -> None:
                 )
                 if existing is not None:
                     _set_completed_status(request, existing)
+                    create_deliveries_for_request(db, request, existing)
                     return
                 if request.status == "failed":
+                    create_deliveries_for_request(db, request, None)
                     return
 
                 moderation_result = ModerationResult(
@@ -131,10 +134,12 @@ async def process_message(message) -> None:
                     is_flagged=result["is_flagged"],
                     category=result["categories"],
                     score=result["scores"],
-                    model="moderashield-text-v1",
+                    model=result["model"],
                 )
+                
                 db.add(moderation_result)
                 _set_completed_status(request, moderation_result)
+                create_deliveries_for_request(db, request, moderation_result)
         except IntegrityError:
             # The unique request_id index is the final guard for writers that
             # do not participate in the request-row lock.
@@ -150,6 +155,7 @@ async def process_message(message) -> None:
                 )
                 if request is not None and existing is not None:
                     _set_completed_status(request, existing)
+                    create_deliveries_for_request(db, request, existing)
                     return
             raise
     finally:

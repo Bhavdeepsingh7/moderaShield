@@ -7,6 +7,8 @@ from sqlalchemy import JSON
 from app.db.base import Base
 from app.models.base import TimeStampMixin
 
+
+
 class ModerationResult(Base, TimeStampMixin):
     __tablename__ = "moderation_results"
 

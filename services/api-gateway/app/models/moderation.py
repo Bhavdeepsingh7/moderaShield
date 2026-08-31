@@ -1,10 +1,16 @@
 import uuid
 
 from sqlalchemy import Integer, String, Text, Uuid
-from sqlalchemy.orm import Mapped , mapped_column
+from sqlalchemy.orm import Mapped , mapped_column, relationship
 
 from app.db.base import Base
 from app.models.base import TimeStampMixin
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.moderation_asset import ModerationAsset
+
 
 class ModerationRequest(Base, TimeStampMixin):
     __tablename__ = "moderation_request"
@@ -27,9 +33,9 @@ class ModerationRequest(Base, TimeStampMixin):
         nullable =False,
     )
 
-    content: Mapped[str] = mapped_column(
+    content: Mapped[str | None] = mapped_column(
         Text,
-        nullable =False,
+        nullable =True,
     )
 
 
@@ -48,3 +54,10 @@ class ModerationRequest(Base, TimeStampMixin):
     )
 
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    asset: Mapped["ModerationAsset | None"] = relationship(
+        "ModerationAsset",
+        back_populates = "request",
+        uselist = False,
+        cascade="all, delete-orphan",
+    )

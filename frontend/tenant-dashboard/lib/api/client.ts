@@ -83,6 +83,29 @@ export interface ApiKeyResponse {
   last_used_at?: string | null;
 }
 
+export interface WebhookResponse {
+  id: string;
+  url: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  secret?: string;
+}
+
+export interface WebhookDeliveryResponse {
+  id: string;
+  webhook_id: string;
+  request_id: string;
+  event_type: string;
+  status: string;
+  attempt_count: number;
+  last_error: string | null;
+  next_attempt_at: string | null;
+  delivered_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Helper to get local API Key
 export function getStoredApiKey(): string | null {
   if (typeof window === "undefined") return null;
@@ -254,5 +277,34 @@ export const apiClient = {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async revokeApiKey(_tenantId: string, _keyId: string): Promise<{ success: boolean }> {
     throw new Error("API key revocation is not supported by the backend.");
+  },
+
+  // 12. Webhooks
+  async listWebhooks(): Promise<WebhookResponse[]> {
+    return await this.request<WebhookResponse[]>("/webhooks/");
+  },
+
+  async createWebhook(url: string): Promise<WebhookResponse> {
+    return await this.request<WebhookResponse>("/webhooks/", {
+      method: "POST",
+      body: JSON.stringify({ url })
+    });
+  },
+
+  async updateWebhook(id: string, enabled: boolean): Promise<WebhookResponse> {
+    return await this.request<WebhookResponse>(`/webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled })
+    });
+  },
+
+  async deleteWebhook(id: string): Promise<void> {
+    await this.request<void>(`/webhooks/${id}`, {
+      method: "DELETE"
+    });
+  },
+
+  async getWebhookDeliveries(webhookId: string): Promise<WebhookDeliveryResponse[]> {
+    return await this.request<WebhookDeliveryResponse[]>(`/webhooks/${webhookId}/deliveries`);
   }
 };

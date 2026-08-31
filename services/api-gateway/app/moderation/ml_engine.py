@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 
 import torch 
+from functools import lru_cache
 
 from huggingface_hub import hf_hub_download
 from transformers import (
@@ -9,48 +10,54 @@ from transformers import (
     AutoTokenizer,
 )
 
+@lru_cache(maxsize=1)
+def _load_model():
+    tokenizer = AutoTokenizer.from_pretrained(
+    MODEL_ID
+    )
+
+    model = AutoModelForSequenceClassification.from_pretrained(
+        MODEL_ID
+    )
+
+    model.to(device)
+    model.eval()
+
+    threshold_path = hf_hub_download(
+        repo_id = MODEL_ID,
+        filename = "thresholds.json",
+    )
+
+    label_map_path = hf_hub_download(
+        repo_id = MODEL_ID,
+        filename= "label_map.json"
+    )
+
+    with open(threshold_path) as f:
+        thresholds = json.load(f)
+
+    with open(label_map_path) as f:
+        label_map= json.load(f)
+
+    print("Moderation model loaded")
+
+    return tokenizer, model , thresholds, label_map
+
+
 MODEL_ID = "bhavdeepsingh/moderashield-text-moderation"
 
 device = torch.device(
-    "cuda"
- if torch.cuda.is_available() else "cpu"
+    "cuda" if torch.cuda.is_available() else "cpu"
  )
-
-tokenizer = AutoTokenizer.from_pretrained(
-    MODEL_ID
-)
-
-model = AutoModelForSequenceClassification.from_pretrained(
-    MODEL_ID
-)
-
-model.to(device)
-model.eval()
-
-threshold_path = hf_hub_download(
-    repo_id = MODEL_ID,
-    filename = "thresholds.json",
-)
-
-label_map_path = hf_hub_download(
-    repo_id = MODEL_ID,
-    filename= "label_map.json"
-)
-
-with open(threshold_path) as f:
-    thresholds = json.load(f)
-
-with open(label_map_path) as f:
-    label_map= json.load(f)
-
-print("Moderation model loaded")
 
 
 @torch.inference_mode()
 def predict(text: str) -> dict:
 
+    tokenizer,model,thresholds,label_map = _load_model()
+
     encoded = tokenizer(
-        text, 
+        text,
         max_length = 256,
         truncation = True,
         padding = True,

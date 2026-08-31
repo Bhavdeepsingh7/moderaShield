@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import api_key, metrics, moderation, tenant
+from app.api.v1.endpoints import api_key, metrics, moderation, tenant, webhooks
 
 router = APIRouter()
 
@@ -27,3 +27,5 @@ router.include_router(
     prefix="/metrics",
     tags=["Metrics"],
 )
+
+router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
