@@ -1,9 +1,10 @@
-﻿import io
+import io
 import pytest
 from uuid import uuid4
 from PIL import Image
 
 from app.models.moderation import ModerationRequest
+from app.services.inference.audio_handler import AudioModerationHandler
 from app.services.inference.image_handler import ImageModerationHandler
 from app.services.inference.registry import get_moderation_handler
 from app.services.inference.text_handler import TextModerationHandler
@@ -19,9 +20,14 @@ def test_image_handler_is_registered():
     assert isinstance(handler, ImageModerationHandler)
 
 
+def test_audio_handler_is_registered():
+    handler = get_moderation_handler("audio")
+    assert isinstance(handler, AudioModerationHandler)
+
+
 def test_unsupported_handler_type():
     with pytest.raises(ValueError, match="Unsupported moderation content type"):
-        get_moderation_handler("audio")
+        get_moderation_handler("video")
 
 
 def test_image_handler_resolves_asset(monkeypatch):

@@ -1,4 +1,4 @@
-﻿"""Exceptions for media handling, security, and validation."""
+"""Exceptions for media handling, security, and validation."""
 
 
 class NonRetriableProcessingError(Exception):
@@ -23,3 +23,23 @@ class ImageDimensionError(ImageValidationError):
 
 class ImageDecompressionBombError(ImageValidationError):
     """Raised when image pixel count exceeds decompression bomb protection limits."""
+
+
+class AudioValidationError(NonRetriableProcessingError):
+    """Base exception for audio validation failures."""
+
+
+class AudioCorruptError(AudioValidationError):
+    """Raised when audio data cannot be decoded, is malformed, or is corrupted."""
+
+
+class AudioFormatError(AudioValidationError):
+    """Raised when an unsupported audio format is detected."""
+
+
+class AudioDurationError(AudioValidationError):
+    """Raised when audio duration exceeds configured maximum limits."""
+
+
+class AudioSizeError(AudioValidationError):
+    """Raised when audio size exceeds configured maximum byte limits."""

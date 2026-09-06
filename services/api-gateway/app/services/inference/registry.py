@@ -1,5 +1,6 @@
 # from .base import InferenceService
 from .handler import ModerationHandler
+from .audio_handler import AudioModerationHandler
 from .image_handler import ImageModerationHandler
 from .text_handler import TextModerationHandler
 
@@ -7,6 +8,7 @@ from .text_handler import TextModerationHandler
 _HANDLERS: dict[str, type[ModerationHandler]] = {
     "text": TextModerationHandler,
     "image": ImageModerationHandler,
+    "audio": AudioModerationHandler,
 }
 
 

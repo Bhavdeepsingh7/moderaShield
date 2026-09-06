@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Comma-separated so it remains straightforward to configure through env.
     ALLOWED_MEDIA_TYPES: str = (
         "image/jpeg,image/png,image/gif,image/webp,"
-        "audio/mpeg,audio/wav,audio/ogg,audio/mp4,"
+        "audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/mp4,audio/x-m4a,audio/flac,audio/webm,"
         "video/mp4,video/webm,video/quicktime"
     )
 
@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     IMAGE_MAX_DIMENSION: int = 8192
     IMAGE_MAX_TOTAL_PIXELS: int = 25_000_000
     IMAGE_ALLOWED_FORMATS: str = "JPEG,PNG,GIF,WEBP"
+
+    # Audio moderation configuration
+    AUDIO_TRANSCRIPTION_MODEL: str = "openai/whisper-tiny"
+    AUDIO_TRANSCRIPTION_DEVICE: str = "auto"
+    AUDIO_TRANSCRIPTION_LANGUAGE: str | None = None
+    AUDIO_MAX_SIZE_BYTES: int = 25_000_000
+    AUDIO_MAX_DURATION_SECONDS: float = 300.0
+    AUDIO_ALLOWED_FORMATS: str = "WAV,MP3,OGG,FLAC"
 
     WEBHOOK_REQUEST_TIMEOUT_SECONDS: float = 5.0
     WEBHOOK_MAX_ATTEMPTS: int = 5
@@ -57,6 +65,14 @@ class Settings(BaseSettings):
         return frozenset(
             fmt.strip().upper()
             for fmt in self.IMAGE_ALLOWED_FORMATS.split(",")
+            if fmt.strip()
+        )
+
+    @property
+    def audio_allowed_formats(self) -> frozenset[str]:
+        return frozenset(
+            fmt.strip().upper()
+            for fmt in self.AUDIO_ALLOWED_FORMATS.split(",")
             if fmt.strip()
         )
 

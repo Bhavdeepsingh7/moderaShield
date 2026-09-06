@@ -111,13 +111,19 @@ async def create_media_moderation_request(
     elif mime_type.startswith("audio/"):
         content_type = ContentType.AUDIO
 
+    max_size_bytes = (
+        settings.AUDIO_MAX_SIZE_BYTES
+        if content_type == ContentType.AUDIO
+        else settings.MAX_MEDIA_SIZE_BYTES
+    )
+
     try:
         # Basic routing uses the declared MIME type. Signature validation is
         # deliberately deferred until a streaming-safe detector is selected.
         media = media_service.upload(
             file=file,
             tenant_id=tenant.id,
-            max_size_bytes=settings.MAX_MEDIA_SIZE_BYTES,
+            max_size_bytes=max_size_bytes,
             content_type=mime_type,
         )
     except MediaUploadTooLargeError:

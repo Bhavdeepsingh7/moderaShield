@@ -94,3 +94,93 @@ Webhook Delivery (asynchronous tenant notification)
 
 ### Data Confidentiality
 - Raw media bytes are never persisted in PostgreSQL, Kafka event payloads, outbox events, application logs, or webhook delivery payloads.
+
+## Audio Moderation (Phase 4)
+
+ModeraShield provides production-quality audio moderation following the core architectural principle:
+**Audio is transcribed to text and the transcript is passed through the existing text moderation model.**
+The speech-to-text model itself does NOT perform moderation; it converts spoken speech into text, which is then moderated by the central text moderation engine (`bhavdeepsingh/moderashield-text-moderation`).
+
+### End-to-End Architecture Flow
+
+```
+API audio upload (POST /api/v1/moderate/media)
+    ↓
+Storage Service (server-generated tenant-scoped key)
+    ↓
+ModerationAsset (metadata, size, checksum, mime_type)
+    ↓
+ModerationRequest (status="pending", content_type="audio", asset_id)
+    ↓
+Outbox Event (moderation.requested, metadata only)
+    ↓
+Kafka Topic (moderation-requests)
+    ↓
+Moderation Worker (consumer group: moderation-worker)
+    ↓
+AudioModerationHandler
+    ↓
+AssetResolver (tenant isolation check & storage stream open)
+    ↓
+Audio Security & Validation (container check, duration bounds, size limit, safe decoding)
+    ↓
+SpeechToTextService (OpenAI Whisper via Hugging Face Transformers)
+    ↓
+TextInferenceService (existing text classifier: toxic, obscene, threat, insult, identity_hate)
+    ↓
+Normalized Moderation Result (composite model name, scores, categories)
+    ↓
+ModerationResult (persisted outside inference transaction)
+    ↓
+Webhook Delivery (asynchronous tenant notification)
+```
+
+### Supported Formats & MIME Types
+- **Allowlisted Media MIME Types**: `audio/wav`, `audio/x-wav`, `audio/mpeg`, `audio/ogg`, `audio/flac`, `audio/mp4`, `audio/x-m4a`, `audio/webm`
+- **Supported Container Formats**: `WAV`, `MP3`, `OGG`, `FLAC` natively supported via `soundfile` / `libsndfile` (bundled in wheel without external dependencies). Video-container formats (e.g. `MP4`, `M4A`, `WEBM`) require system `ffmpeg`. If a container requires an external tool not installed on the system, it is rejected with an explicit `AudioFormatError`.
+- **Validation**: Inspects magic bytes and container metadata rather than blindly trusting client-supplied `Content-Type`.
+
+### Audio Security & Validation Limits
+- **Maximum Audio Size**: 25,000,000 bytes (~25MB, configurable via `AUDIO_MAX_SIZE_BYTES`). Files exceeding this limit are rejected at upload time (HTTP 413) or worker validation (`AudioSizeError`).
+- **Maximum Audio Duration**: 300.0 seconds (5 minutes, configurable via `AUDIO_MAX_DURATION_SECONDS`). Audio exceeding this limit is cleanly rejected as permanent `AudioDurationError`.
+- **Integrity Check**: Audio sample frames are decoded and checked for NaN/Inf or truncation before inference.
+- **Sample Rate & Channels**: Multi-channel audio is automatically downmixed to mono float32, and audio is resampled to 16,000 Hz for Whisper feature extraction.
+
+### Speech-to-Text Model & Configuration
+- **Model**: `openai/whisper-tiny` (configurable via `AUDIO_TRANSCRIPTION_MODEL`).
+- **Device**: `auto` (detects `cuda` if available, otherwise falls back to `cpu`; configurable via `AUDIO_TRANSCRIPTION_DEVICE`).
+- **Language**: Optional language code (e.g. `en`) or `None` for automatic language detection (configurable via `AUDIO_TRANSCRIPTION_LANGUAGE`).
+- **Lazy Singleton Initialization**: Model weights are loaded and cached in memory across worker messages (`@lru_cache(maxsize=1)`) only when audio moderation is first requested, avoiding application startup overhead.
+
+### Model Name & Attribution Contract
+The final `model` attribute in `ModerationResult` clearly reflects both components:
+```
+<transcription-model> + <text-moderation-model>
+```
+Example: `"openai/whisper-tiny + moderashield-text-v1"`
+
+### Normalized Moderation Output Schema
+```json
+{
+    "is_flagged": false,
+    "categories": [],
+    "scores": {
+        "toxic": 0.0012,
+        "severe_toxic": 0.0001,
+        "obscene": 0.0005,
+        "threat": 0.0002,
+        "insult": 0.0008,
+        "identity_hate": 0.0001
+    },
+    "model": "openai/whisper-tiny + moderashield-text-v1"
+}
+```
+*Note: If no speech is detected (e.g. silence or background noise), the request is approved with 0.0 scores without invoking the text model.*
+
+### Failure Classification & Poison Pill Protection
+- **Terminal Failures (`NonRetriableProcessingError`)**: Malformed audio (`AudioCorruptError`), unsupported format (`AudioFormatError`), duration limit exceeded (`AudioDurationError`), size limit exceeded (`AudioSizeError`), missing asset (`FileNotFoundError`), and tenant access mismatch (`PermissionError`). They transition `status = "failed"` immediately, record `last_error`, send failure webhook, and commit Kafka offset.
+- **Retriable Failures**: Transient exceptions (network timeouts, storage connectivity issues, GPU out-of-memory) preserve uncommitted offset and retry up to `MAX_RETRIES` (3).
+
+### Data Confidentiality & Privacy
+- Raw audio bytes are never stored in PostgreSQL, Kafka event payloads, outbox events, application logs, or webhooks.
+- Transcripts are ephemeral intermediate processing data and are NOT logged by default or stored in a separate table.
