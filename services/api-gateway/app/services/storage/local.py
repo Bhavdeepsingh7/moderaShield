@@ -52,6 +52,16 @@ class LocalStorageService(StorageService):
         if path.exists():
             path.unlink()
 
+        # Generated keys create a tenant directory.  Remove empty parents so a
+        # failed ingestion leaves neither an object nor a stale directory.
+        parent = path.parent
+        while parent != self.root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+
 
     def exists(
         self,

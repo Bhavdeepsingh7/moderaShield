@@ -17,31 +17,35 @@ class ModeratiionService:
             tenant: Tenant,
             data:ModerationRequestCreate
     ) -> ModerationRequest:
+
+        asset = None
+
+        if data.media is not None:
+            asset = ModerationAsset(
+                tenant_id = tenant.id,
+                storage_provider = data.media.storage_provider,
+                object_key = data.media.object_key,
+                mime_type = data.media.content_type,
+                size_bytes = data.media.size_bytes,
+                checksum = data.media.checksum,
+                asset_metadata = data.media.asset_metadata,
+            )
+
+            db.add(asset)
+            db.flush()
+
+
         moderation_request = ModerationRequest(
             tenant_id = tenant.id,
-            content_type= data.content_type,
+            content_type= data.content_type.value,
             content = data.content,
+            asset_id= asset.id if asset else None,
             status="pending",
         )
 
         db.add(moderation_request)
 
         db.flush()
-
-        asset = None
-
-        if data.media is not None:
-            asset = ModerationAsset(
-                request_id = moderation_request.id,
-                storage_provider = data.media.storage_provider,
-                object_key = data.media.object_key,
-                mime_type = data.media.mime_type,
-                size_bytes = data.media.size_bytes,
-                checksum = data.media.checksum,
-            )
-
-            db.add(asset)
-            db.flush()
 
         event_payload= {
             "request_id": str(moderation_request.id),

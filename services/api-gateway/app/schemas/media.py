@@ -6,3 +6,4 @@ class MediaReference(BaseModel):
     content_type: str
     size_bytes: int | None = Field(default=None,ge=0)
     checksum: str | None = None
+    asset_metadata: dict | None = None

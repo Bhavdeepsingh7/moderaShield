@@ -1,8 +1,10 @@
 from .base import StorageService
 from .local import LocalStorageService
 
+from app.core.config import settings
+
 _STORAGE_SERVICES: dict[str, StorageService] = {
-    "local": LocalStorageService("storage"),
+    "local": LocalStorageService(settings.STORAGE_ROOT),
 }
 
 def get_storage_service(storage_provider: str) -> StorageService:

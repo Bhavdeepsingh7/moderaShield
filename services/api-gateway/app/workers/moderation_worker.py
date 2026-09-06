@@ -15,7 +15,8 @@ from app.messaging.topics import MODERATION_REQUESTS_TOPIC
 from app.models.moderation import ModerationRequest
 from app.models.moderation_result import ModerationResult
 from app.services.webhook_service import create_deliveries_for_request
-from app.services.inference.registry import get_inference_service
+from app.services.inference.registry import get_moderation_handler
+from app.services.media.exceptions import NonRetriableProcessingError
 
 logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
@@ -64,16 +65,18 @@ async def process_message(message) -> None:
 
             request.status = "processing"
             content_type = request.content_type
-            content = request.content
+            # content = request.content
 
         try:
             # Transformer inference is synchronous and can block for long
             # enough to starve aiokafka heartbeats during cold model loading.
             # Run it off the event loop while retaining the same model call.
-            inference_service = get_inference_service(content_type)
+            handler = get_moderation_handler(content_type)
 
-            result = await asyncio.to_thread(inference_service.moderate, content,)
+            result = await asyncio.to_thread(handler.handle, db, request,)
         except Exception as error:
+            if db.in_transaction():
+                db.rollback()
             with db.begin():
                 request = db.scalar(
                     select(ModerationRequest)
@@ -95,9 +98,20 @@ async def process_message(message) -> None:
                 # Some built-in errors (notably MemoryError) stringify to an
                 # empty string. Persist a useful deterministic diagnostic.
                 request.last_error = str(error) or error.__class__.__name__
-                if request.retry_count >= MAX_RETRIES:
+                is_terminal = (
+                    isinstance(
+                        error,
+                        (NonRetriableProcessingError, PermissionError, ValueError),
+                    )
+                    or request.retry_count >= MAX_RETRIES
+                )
+                if is_terminal:
                     request.status = "failed"
-                    logger.exception("Moderation request %s failed permanently", request_id)
+                    logger.warning(
+                        "Moderation request %s failed permanently: %s",
+                        request_id,
+                        request.last_error,
+                    )
                     create_deliveries_for_request(db, request, None)
                     return
                 request.status = "pending"
@@ -109,6 +123,8 @@ async def process_message(message) -> None:
             ) from error
 
         try:
+            if db.in_transaction():
+                db.rollback()
             # Result insertion and terminal status change succeed or fail together.
             with db.begin():
                 request = db.scalar(

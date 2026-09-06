@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Integer, String, Text, Uuid
+from sqlalchemy import Integer, String, Text, Uuid, ForeignKey
 from sqlalchemy.orm import Mapped , mapped_column, relationship
 
 from app.db.base import Base
@@ -57,7 +57,12 @@ class ModerationRequest(Base, TimeStampMixin):
 
     asset: Mapped["ModerationAsset | None"] = relationship(
         "ModerationAsset",
-        back_populates = "request",
-        uselist = False,
-        cascade="all, delete-orphan",
+        back_populates = "requests",
+    )
+
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("moderation_assets.id", ondelete = "SET NULL"),
+        nullable = True,
+        index= True,
     )

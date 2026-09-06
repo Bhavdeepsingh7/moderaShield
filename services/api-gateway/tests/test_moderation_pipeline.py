@@ -24,16 +24,13 @@ from app.models.tenant import Tenant
 from app.workers import moderation_worker
 
 
-class FakeInferenceService:
-    def __init__(self, predict_fn):
-        self.predict_fn = predict_fn
 
-    def moderate(self, content):
-        result = self.predict_fn(content)
-        if "model" not in result:
-            result = {**result, "model": "test-model"}
-        return result
+class FakeModerationHandler:
+    def __init__(self, predict):
+        self.predict = predict
 
+    def handle(self, db, request):
+        return self.predict(request.content)
 
 class Message:
     def __init__(self, request_id):
@@ -64,10 +61,10 @@ def test_successful_moderation_and_duplicate_message(session_factory, monkeypatc
     def predict(_content):
         nonlocal calls
         calls += 1
-        return {"is_flagged": True, "categories": ["toxic"], "scores": {"toxic": 0.9}}
+        return {"is_flagged": True, "categories": ["toxic"], "scores": {"toxic": 0.9}, "model": "fake-model-v1",}
 
-    fake_service = FakeInferenceService(predict)
-    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
+    fake_handler = FakeModerationHandler(predict)
+    monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda content_type: fake_handler)
     asyncio.run(moderation_worker.process_message(Message(request.id)))
     asyncio.run(moderation_worker.process_message(Message(request.id)))
 
@@ -81,7 +78,7 @@ def test_successful_moderation_and_duplicate_message(session_factory, monkeypatc
 
 def test_failed_attempt_is_persisted_then_can_succeed(session_factory, monkeypatch):
     request = add_request(session_factory)
-    outcomes = iter([RuntimeError("temporary inference error"), {"is_flagged": False, "categories": [], "scores": {}}])
+    outcomes = iter([RuntimeError("temporary inference error"), {"is_flagged": False, "categories": [], "scores": {},"model": "fake-model-v1", }])
 
     def predict(_content):
         outcome = next(outcomes)
@@ -89,8 +86,8 @@ def test_failed_attempt_is_persisted_then_can_succeed(session_factory, monkeypat
             raise outcome
         return outcome
 
-    fake_service = FakeInferenceService(predict)
-    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
+    fake_handler = FakeModerationHandler(predict)
+    monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda content_type: fake_handler)
     with pytest.raises(moderation_worker.RetriableProcessingError):
         asyncio.run(moderation_worker.process_message(Message(request.id)))
     with session_factory() as db:
@@ -105,8 +102,8 @@ def test_failed_attempt_is_persisted_then_can_succeed(session_factory, monkeypat
 
 def test_final_failure_is_terminal_and_creates_no_result(session_factory, monkeypatch):
     request = add_request(session_factory)
-    fake_service = FakeInferenceService(lambda _content: (_ for _ in ()).throw(RuntimeError("model unavailable")))
-    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
+    fake_handler = FakeModerationHandler(lambda _content: (_ for _ in ()).throw(RuntimeError("model unavailable")))
+    monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda content_type: fake_handler)
 
     for _ in range(moderation_worker.MAX_RETRIES - 1):
         with pytest.raises(moderation_worker.RetriableProcessingError):

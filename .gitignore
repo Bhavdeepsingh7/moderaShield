@@ -102,6 +102,7 @@ alembic/versions/__pycache__/
 *.temp
 *.swp
 *.swo
+storage/
 
 # ===========================
 # Secrets

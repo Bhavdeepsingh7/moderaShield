@@ -1,12 +1,16 @@
-import uuid 
+import uuid
 
-from sqlalchemy import BigInteger , ForeignKey , JSON, String , Uuid
-from sqlalchemy.orm import Mapped,  mapped_column , relationship
+from sqlalchemy import BigInteger, JSON, String, Uuid
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.base import TimeStampMixin
 
-from app.models.moderation import ModerationRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.moderation import ModerationRequest
+
 
 class ModerationAsset(Base, TimeStampMixin):
     __tablename__ = "moderation_assets"
@@ -17,11 +21,9 @@ class ModerationAsset(Base, TimeStampMixin):
         default=uuid.uuid4,
     )
 
-    request_id: Mapped[uuid.UUID] = mapped_column(
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
-        ForeignKey("moderation_request.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
         index=True,
     )
 
@@ -55,7 +57,7 @@ class ModerationAsset(Base, TimeStampMixin):
         nullable=True,
     )
 
-    request: Mapped["ModerationRequest"] = relationship(
+    requests: Mapped[list["ModerationRequest"]] = relationship(
         "ModerationRequest",
-        back_populates ="asset"
-    ) 
+        back_populates="asset",
+    )

@@ -30,15 +30,13 @@ from app.models.moderation_result import ModerationResult
 from app.workers import moderation_worker
 
 
-class FakeInferenceService:
-    def __init__(self, predict_fn):
-        self.predict_fn = predict_fn
 
-    def moderate(self, content):
-        result = self.predict_fn(content)
-        if "model" not in result:
-            result = {**result, "model": "test-model"}
-        return result
+class FakeModerationHandler:
+    def __init__(self, predict):
+        self.predict = predict
+
+    def handle(self, db, request):
+        return self.predict(request.content)
 
 
 from app.workers import webhook_worker
@@ -203,11 +201,11 @@ def test_moderation_completion_creates_delivery(client_and_session, monkeypatch)
 
     # Mock moderation prediction
     def mock_predict(_content):
-        return {"is_flagged": True, "categories": ["toxic"], "scores": {"toxic": 0.95}}
+        return {"is_flagged": True, "categories": ["toxic"], "scores": {"toxic": 0.95}, "model": "fake-model-v1"}
 
-    fake_service = FakeInferenceService(mock_predict)
+    fake_handler = FakeModerationHandler(mock_predict)
     monkeypatch.setattr(moderation_worker, "SessionLocal", factory)
-    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
+    monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda content_type: fake_handler)
 
     # Execute moderation processing
     asyncio.run(moderation_worker.process_message(MockMessage(request.id)))
@@ -412,9 +410,9 @@ def test_webhook_failure_does_not_rollback_moderation(client_and_session, monkey
     with factory.begin() as db:
         db.add(request)
 
-    fake_service = FakeInferenceService(lambda x: {"is_flagged": False, "categories": [], "scores": {}})
+    fake_handler = FakeModerationHandler(lambda x: {"is_flagged": False, "categories": [], "scores": {}, "model": "fake-model-v1"})
     monkeypatch.setattr(moderation_worker, "SessionLocal", factory)
-    monkeypatch.setattr(moderation_worker, "get_inference_service", lambda content_type: fake_service)
+    monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda content_type: fake_handler)
 
     # Run moderation worker
     asyncio.run(moderation_worker.process_message(MockMessage(request.id)))
