@@ -2,7 +2,7 @@ from uuid import UUID
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,7 @@ async def create_moderation_request(
     data: ModerationRequestCreate,
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     _: None = Depends(check_rate_limit)
 ):
     # Media references are server-issued upload results.  Accepting one in the
@@ -49,6 +50,7 @@ async def create_moderation_request(
         db,
         tenant,
         data,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -91,6 +93,7 @@ async def create_media_moderation_request(
     file: UploadFile = File(...),
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     _: None = Depends(check_rate_limit)
 ):
     if not file.content_type:
@@ -150,7 +153,12 @@ async def create_media_moderation_request(
     )
 
     try:
-        return moderation_service.create_request(db, tenant, data)
+        return moderation_service.create_request(
+            db,
+            tenant,
+            data,
+            idempotency_key=idempotency_key,
+        )
     except Exception:
         db.rollback()
         # Storage and the database cannot form a distributed transaction. If
