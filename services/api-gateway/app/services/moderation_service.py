@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 
 import json
 import logging
+import uuid
 from app.models.moderation import ModerationRequest
 from app.models.tenant import Tenant
 from app.models.outbox import OutboxEvent
@@ -122,7 +123,9 @@ class ModeratiionService:
             db.add(moderation_request)
             db.flush()
 
+        outbox_id = uuid.uuid4()
         event_payload = {
+            "event_id": str(outbox_id),
             "request_id": str(moderation_request.id),
             "tenant_id": str(tenant.id),
             "content_type": data.content_type.value,
@@ -132,6 +135,7 @@ class ModeratiionService:
             event_payload["asset_id"] = str(asset.id)
 
         outbox_event = OutboxEvent(
+            id=outbox_id,
             event_type="moderation.requested",
             aggregate_id=moderation_request.id,
             payload=json.dumps(event_payload),

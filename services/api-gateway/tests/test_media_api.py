@@ -97,6 +97,7 @@ def test_media_upload_creates_asset_request_outbox_and_storage(
         assert asset.checksum
         assert storage.exists(asset.object_key)
         assert payload == {
+            "event_id": str(event.id),
             "request_id": str(request.id),
             "tenant_id": str(tenant.id),
             "content_type": expected_content_type,

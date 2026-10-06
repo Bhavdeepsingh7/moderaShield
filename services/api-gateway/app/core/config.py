@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     WEBHOOK_BACKOFF_SECONDS: int = 30
     WEBHOOK_WORKER_POLL_SECONDS: float = 2.0
 
+    OUTBOX_CLAIM_BATCH_SIZE: int = 100
+    # A minute covers ordinary broker latency while allowing an interrupted
+    # publisher to recover work promptly during development and small deployments.
+    OUTBOX_CLAIM_TIMEOUT_SECONDS: int = 60
+    OUTBOX_PUBLISHER_POLL_SECONDS: float = 2.0
+
     REDIS_URL: str = "redis://localhost:6379/0"
 
     RATE_LIMIT_REQUESTS: int = 2
