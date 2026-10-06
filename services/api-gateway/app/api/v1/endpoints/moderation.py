@@ -20,6 +20,7 @@ from app.services.moderation_service import moderation_service
 from app.core.config import settings
 from app.services.media_service import MediaUploadTooLargeError, media_service
 from app.schemas.moderation import ContentType
+from app.dependencies.rate_limit import check_rate_limit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,9 +34,12 @@ async def create_moderation_request(
     data: ModerationRequestCreate,
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit)
 ):
     # Media references are server-issued upload results.  Accepting one in the
     # JSON endpoint would let a client point at another provider/object key.
+
+
     if data.media is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -87,6 +91,7 @@ async def create_media_moderation_request(
     file: UploadFile = File(...),
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit)
 ):
     if not file.content_type:
         raise HTTPException(

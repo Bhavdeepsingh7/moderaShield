@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,12 +10,18 @@ from app.core.config import settings
 from app.api.v1.router import router as api_router
 from app.messaging.kafka import start_kafka, stop_kafka
 
+from app.services.rate_limiter import RateLimiter
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     await start_kafka()
 
+    app.state.rate_limiter = RateLimiter()
+
     yield
+
+    await app.state.rate_limiter.close()
 
     await stop_kafka()
 

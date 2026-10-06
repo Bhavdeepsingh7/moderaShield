@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     WEBHOOK_BACKOFF_SECONDS: int = 30
     WEBHOOK_WORKER_POLL_SECONDS: float = 2.0
 
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    RATE_LIMIT_REQUESTS: int = 2
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+
     model_config = SettingsConfigDict(
         env_file = ".env",
         extra = "ignore"
