@@ -46,12 +46,20 @@ class Settings(BaseSettings):
     WEBHOOK_MAX_ATTEMPTS: int = 5
     WEBHOOK_BACKOFF_SECONDS: int = 30
     WEBHOOK_WORKER_POLL_SECONDS: float = 2.0
+    WEBHOOK_CLAIM_BATCH_SIZE: int = 100
+    WEBHOOK_CLAIM_TIMEOUT_SECONDS: int = 60
+    WEBHOOK_MAX_BACKOFF_SECONDS: int = 3600
+    WEBHOOK_MAX_PAYLOAD_BYTES: int = 262_144
 
     OUTBOX_CLAIM_BATCH_SIZE: int = 100
     # A minute covers ordinary broker latency while allowing an interrupted
     # publisher to recover work promptly during development and small deployments.
     OUTBOX_CLAIM_TIMEOUT_SECONDS: int = 60
     OUTBOX_PUBLISHER_POLL_SECONDS: float = 2.0
+
+    # A crashed worker leaves a durable processing claim.  A later Kafka
+    # delivery may take it over only after this lease has elapsed.
+    MODERATION_PROCESSING_LEASE_SECONDS: int = 900
 
     REDIS_URL: str = "redis://localhost:6379/0"
 

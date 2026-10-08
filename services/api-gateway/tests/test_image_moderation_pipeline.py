@@ -416,7 +416,7 @@ def test_unsupported_storage_provider_terminal_failure(image_pipeline_env, monke
         assert "Unsupported storage provider" in stored.last_error
 
 
-def test_missing_storage_object_retries_then_fails(image_pipeline_env, monkeypatch):
+def test_missing_storage_object_fails_without_retry(image_pipeline_env, monkeypatch):
     factory, storage = image_pipeline_env
     tenant_id = uuid4()
     tenant = Tenant(id=tenant_id, name="tenant", slug="tenant", status="active")
@@ -445,21 +445,12 @@ def test_missing_storage_object_retries_then_fails(image_pipeline_env, monkeypat
     handler = ImageModerationHandler()
     monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda ct: handler)
 
-    # Attempts 1 and 2 raise RetriableProcessingError
-    for attempt in range(1, moderation_worker.MAX_RETRIES):
-        with pytest.raises(moderation_worker.RetriableProcessingError):
-            asyncio.run(moderation_worker.process_message(Message(req.id)))
-        with factory() as db:
-            stored = db.get(ModerationRequest, req.id)
-            assert stored.status == "pending"
-            assert stored.retry_count == attempt
-
-    # Final attempt marks failed
+    # A missing required object cannot be repaired by Kafka redelivery.
     asyncio.run(moderation_worker.process_message(Message(req.id)))
     with factory() as db:
         stored = db.get(ModerationRequest, req.id)
         assert stored.status == "failed"
-        assert stored.retry_count == moderation_worker.MAX_RETRIES
+        assert stored.retry_count == 1
 
 
 def test_transient_inference_error_retries_then_succeeds(image_pipeline_env, monkeypatch):

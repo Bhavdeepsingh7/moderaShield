@@ -3,6 +3,7 @@ import json
 import os
 import hmac
 import hashlib
+import concurrent.futures
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4, UUID
 
@@ -426,3 +427,44 @@ def test_webhook_failure_does_not_rollback_moderation(client_and_session, monkey
         deliveries = db.scalars(select(WebhookDelivery)).all()
         assert len(deliveries) == 1
         assert deliveries[0].status == "pending"
+
+
+@pytest.fixture
+def postgres_webhook_factory():
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL webhook claim tests")
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        yield factory
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_postgresql_webhook_claim_and_stale_recovery(postgres_webhook_factory):
+    factory = postgres_webhook_factory
+    tenant = Tenant(name="claim-tenant", slug=f"claim-{uuid4()}", status="active")
+    with factory.begin() as db:
+        db.add(tenant); db.flush()
+        webhook = Webhook(tenant_id=tenant.id, url="https://example.com/hook", secret="secret")
+        db.add(webhook); db.flush()
+        delivery = WebhookDelivery(webhook_id=webhook.id, tenant_id=tenant.id, request_id=uuid4(), event_type="moderation.completed", payload={"event": "moderation.completed"}, next_attempt_at=datetime.now(timezone.utc))
+        db.add(delivery)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        a, b = [future.result() for future in [executor.submit(webhook_worker.claim_pending_deliveries, factory, 1), executor.submit(webhook_worker.claim_pending_deliveries, factory, 1)]]
+    assert sorted([len(a), len(b)]) == [0, 1]
+    claim = (a or b)[0]
+    with factory.begin() as db:
+        db.get(WebhookDelivery, delivery.id).claimed_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    assert webhook_worker.recover_stale_claims(factory, timeout_seconds=60) == 1
+    replacement = webhook_worker.claim_pending_deliveries(factory, 1)[0]
+    assert replacement["claim_token"] != claim["claim_token"]
+
+
+def test_ssrf_literal_private_destination_rejected():
+    with pytest.raises(ValueError, match="non-public"):
+        asyncio.run(webhook_worker._validate_destination("http://127.0.0.1/internal"))

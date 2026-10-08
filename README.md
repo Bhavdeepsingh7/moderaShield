@@ -92,6 +92,18 @@ Webhook Delivery (asynchronous tenant notification)
 - **Terminal Failures**: Malformed images, unsupported formats, decompression bombs, missing assets, and tenant access mismatches are classified as `NonRetriableProcessingError`. They transition the request to `status = "failed"` immediately, record `last_error`, trigger failure webhook notifications, and commit the Kafka message to avoid partition blocking or infinite retry loops.
 - **Retriable Failures**: Transient exceptions (e.g., temporary resource exhaustion or network timeouts) preserve the uncommitted Kafka offset and retry up to `MAX_RETRIES` (3) before marking the request as permanently failed.
 
+### Worker Delivery Semantics (Phase 6.4)
+- Kafka delivery is **at least once**. A record is committed only after its request reaches a terminal outcome (approved, flagged, or failed); a crash after the database commit but before Kafka commit is safe because redelivery observes the existing result.
+- Request lifecycle is `pending -> processing -> approved|flagged` or `pending -> processing -> failed`. A retryable error performs `processing -> pending`; `retry_count` is the number of failed retries already recorded and is capped at three.
+- A durable `processing_token` is a lease-backed claim. A duplicate delivery with an active claim does not perform inference. A claim older than `MODERATION_PROCESSING_LEASE_SECONDS` may be reclaimed, and a stale worker cannot write its result over the replacement claim.
+- The claim transaction ends before inference. Result insertion, terminal request status, and webhook-delivery creation share one short transaction. The unique `moderation_results.request_id` constraint remains the final database-level duplicate-result guard.
+
+### Webhook Delivery Semantics (Phase 6.5)
+- Webhooks are **at least once**: `pending → processing → delivered|failed`, with retryable failures returning to `pending`. A crash after a receiver accepts HTTP but before the database update can produce a duplicate request.
+- Workers claim rows with `FOR UPDATE SKIP LOCKED`, a durable token, and a lease. Claim recovery makes interrupted work retryable; token-conditional finalization prevents stale workers from changing a replacement claim.
+- 408, 429, 5xx and network failures retry with bounded exponential backoff and deterministic jitter; other 4xx responses are terminal. Redirects are disabled. Every destination hostname is resolved before use and non-public addresses are rejected. Network egress controls remain necessary to close the DNS-rebinding race between resolution and connection.
+- Requests include JSON content type, event ID/type, timestamp, and an HMAC-SHA256 signature. Payloads are size-bounded; logs omit secrets and payload bodies.
+
 ### Data Confidentiality
 - Raw media bytes are never persisted in PostgreSQL, Kafka event payloads, outbox events, application logs, or webhook delivery payloads.
 

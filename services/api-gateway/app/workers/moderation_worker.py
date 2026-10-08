@@ -3,7 +3,8 @@
 import asyncio
 import json
 import logging
-from uuid import UUID
+from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,7 @@ from aiokafka.errors import CommitFailedError
 
 import app.messaging.kafka as kafka
 from app.db.session import SessionLocal
+from app.core.config import settings
 from app.messaging.topics import MODERATION_REQUESTS_TOPIC
 from app.models.moderation import ModerationRequest
 from app.models.moderation_result import ModerationResult
@@ -27,7 +29,40 @@ class RetriableProcessingError(Exception):
 
 
 def _set_completed_status(request: ModerationRequest, result: ModerationResult) -> None:
+    """The API exposes approved/flagged as the two completed outcomes."""
     request.status = "flagged" if result.is_flagged else "approved"
+
+
+def _processing_claim_is_stale(request: ModerationRequest) -> bool:
+    """Return whether a crashed worker's claim can safely be replaced."""
+    if request.updated_at is None:
+        return True
+    updated_at = request.updated_at
+    if updated_at.tzinfo is None:  # SQLite test databases return naive values.
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return updated_at <= datetime.now(timezone.utc) - timedelta(
+        seconds=settings.MODERATION_PROCESSING_LEASE_SECONDS
+    )
+
+
+def _run_inference(request_id: UUID, content_type: str) -> dict:
+    """Run synchronous inference in its own thread-owned DB session.
+
+    This is intentionally separate from the claim transaction: no request row
+    lock or transaction remains open while models/storage perform slow work.
+    """
+    db = SessionLocal()
+    try:
+        request = db.get(ModerationRequest, request_id)
+        if request is None:
+            raise RuntimeError("Moderation request disappeared during processing")
+        # Do not retain even a read transaction while model execution runs.
+        # Handlers that need an asset open and finish their own short DB work.
+        db.expunge(request)
+        db.rollback()
+        return get_moderation_handler(content_type).handle(db, request)
+    finally:
+        db.close()
 
 
 async def process_message(message) -> None:
@@ -40,6 +75,7 @@ async def process_message(message) -> None:
         return
 
     db = SessionLocal()
+    claim_token = uuid4()
     try:
         # The row lock serializes normal duplicate deliveries.  Looking for an
         # existing result before inference makes redelivery a cheap no-op.
@@ -57,23 +93,32 @@ async def process_message(message) -> None:
             )
             if existing is not None:
                 _set_completed_status(request, existing)
+                request.processing_token = None
                 create_deliveries_for_request(db, request, existing)
                 return
             if request.status == "failed":
+                request.processing_token = None
                 create_deliveries_for_request(db, request, None)
                 return
 
+            # A current claim belongs to another delivery.  Do not run model
+            # inference twice; leave this Kafka record uncommitted so it can
+            # later observe that worker's terminal transaction.  An abandoned
+            # claim is recoverable after its lease expires.
+            if request.status == "processing" and not _processing_claim_is_stale(request):
+                raise RetriableProcessingError(
+                    f"Moderation request {request_id} is already processing"
+                )
+
             request.status = "processing"
+            request.processing_token = claim_token
             content_type = request.content_type
-            # content = request.content
 
         try:
             # Transformer inference is synchronous and can block for long
             # enough to starve aiokafka heartbeats during cold model loading.
             # Run it off the event loop while retaining the same model call.
-            handler = get_moderation_handler(content_type)
-
-            result = await asyncio.to_thread(handler.handle, db, request,)
+            result = await asyncio.to_thread(_run_inference, request_id, content_type)
         except Exception as error:
             if db.in_transaction():
                 db.rollback()
@@ -91,8 +136,17 @@ async def process_message(message) -> None:
                 )
                 if existing is not None:
                     _set_completed_status(request, existing)
+                    request.processing_token = None
                     create_deliveries_for_request(db, request, existing)
                     return
+
+                # A reclaimed delivery owns the request now.  Its outcome is
+                # authoritative, so this stale worker must not mutate retry
+                # metadata or overwrite a terminal status.
+                if request.processing_token != claim_token:
+                    raise RetriableProcessingError(
+                        f"Moderation request {request_id} processing claim was replaced"
+                    )
 
                 request.retry_count += 1
                 # Some built-in errors (notably MemoryError) stringify to an
@@ -101,12 +155,18 @@ async def process_message(message) -> None:
                 is_terminal = (
                     isinstance(
                         error,
-                        (NonRetriableProcessingError, PermissionError, ValueError),
+                        (
+                            NonRetriableProcessingError,
+                            FileNotFoundError,
+                            PermissionError,
+                            ValueError,
+                        ),
                     )
                     or request.retry_count >= MAX_RETRIES
                 )
                 if is_terminal:
                     request.status = "failed"
+                    request.processing_token = None
                     logger.warning(
                         "Moderation request %s failed permanently: %s",
                         request_id,
@@ -115,6 +175,7 @@ async def process_message(message) -> None:
                     create_deliveries_for_request(db, request, None)
                     return
                 request.status = "pending"
+                request.processing_token = None
                 retry_count = request.retry_count
 
             raise RetriableProcessingError(
@@ -139,11 +200,17 @@ async def process_message(message) -> None:
                 )
                 if existing is not None:
                     _set_completed_status(request, existing)
+                    request.processing_token = None
                     create_deliveries_for_request(db, request, existing)
                     return
                 if request.status == "failed":
+                    request.processing_token = None
                     create_deliveries_for_request(db, request, None)
                     return
+                if request.processing_token != claim_token:
+                    raise RetriableProcessingError(
+                        f"Moderation request {request_id} processing claim was replaced"
+                    )
 
                 moderation_result = ModerationResult(
                     request_id=request_id,
@@ -155,6 +222,7 @@ async def process_message(message) -> None:
                 
                 db.add(moderation_result)
                 _set_completed_status(request, moderation_result)
+                request.processing_token = None
                 create_deliveries_for_request(db, request, moderation_result)
         except IntegrityError:
             # The unique request_id index is the final guard for writers that
@@ -171,6 +239,7 @@ async def process_message(message) -> None:
                 )
                 if request is not None and existing is not None:
                     _set_completed_status(request, existing)
+                    request.processing_token = None
                     create_deliveries_for_request(db, request, existing)
                     return
             raise

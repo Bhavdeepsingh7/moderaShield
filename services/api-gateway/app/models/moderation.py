@@ -71,6 +71,15 @@ class ModerationRequest(Base, TimeStampMixin):
 
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # A claim is deliberately persisted rather than kept in worker memory.  It
+    # prevents a slow/stale worker from completing a request claimed by a later
+    # Kafka delivery after the processing lease has expired.
+    processing_token: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        nullable=True,
+        index=True,
+    )
+
     asset: Mapped["ModerationAsset | None"] = relationship(
         "ModerationAsset",
         back_populates = "requests",

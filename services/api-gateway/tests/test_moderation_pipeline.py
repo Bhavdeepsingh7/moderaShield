@@ -1,6 +1,8 @@
 import asyncio
+import concurrent.futures
 import json
 import os
+import threading
 from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite://"
@@ -45,6 +47,23 @@ def session_factory(monkeypatch):
     monkeypatch.setattr(moderation_worker, "SessionLocal", factory)
     yield factory
     Base.metadata.drop_all(engine)
+
+
+@pytest.fixture
+def postgres_worker_session_factory(monkeypatch):
+    """Isolated PostgreSQL fixture for real row-lock/claim behaviour."""
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL worker concurrency tests")
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(moderation_worker, "SessionLocal", factory)
+    try:
+        yield factory
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
 
 
 def add_request(factory, tenant_id=None):
@@ -114,6 +133,115 @@ def test_final_failure_is_terminal_and_creates_no_result(session_factory, monkey
         stored = db.get(ModerationRequest, request.id)
         assert (stored.status, stored.retry_count, stored.last_error) == ("failed", moderation_worker.MAX_RETRIES, "model unavailable")
         assert db.scalar(select(func.count()).select_from(ModerationResult)) == 0
+
+
+def test_active_processing_claim_does_not_run_inference_twice(session_factory, monkeypatch):
+    """A concurrent duplicate leaves its Kafka offset uncommitted, not the DB corrupt."""
+    request = add_request(session_factory)
+    with session_factory.begin() as db:
+        stored = db.get(ModerationRequest, request.id)
+        stored.status = "processing"
+        stored.processing_token = uuid4()
+
+    calls = 0
+
+    def predict(_content):
+        nonlocal calls
+        calls += 1
+        return {"is_flagged": False, "categories": [], "scores": {}, "model": "fake"}
+
+    monkeypatch.setattr(
+        moderation_worker,
+        "get_moderation_handler",
+        lambda _content_type: FakeModerationHandler(predict),
+    )
+    with pytest.raises(moderation_worker.RetriableProcessingError):
+        asyncio.run(moderation_worker.process_message(Message(request.id)))
+    assert calls == 0
+
+
+def test_missing_asset_is_a_terminal_failure(session_factory, monkeypatch):
+    request = add_request(session_factory)
+    monkeypatch.setattr(
+        moderation_worker,
+        "get_moderation_handler",
+        lambda _content_type: FakeModerationHandler(
+            lambda _content: (_ for _ in ()).throw(FileNotFoundError("asset missing"))
+        ),
+    )
+
+    asyncio.run(moderation_worker.process_message(Message(request.id)))
+    with session_factory() as db:
+        stored = db.get(ModerationRequest, request.id)
+        assert (stored.status, stored.retry_count) == ("failed", 1)
+
+
+def test_inference_does_not_inherit_the_claim_transaction(session_factory, monkeypatch):
+    request = add_request(session_factory)
+
+    class TransactionCheckingHandler:
+        def handle(self, db, _request):
+            assert not db.in_transaction()
+            return {"is_flagged": False, "categories": [], "scores": {}, "model": "fake"}
+
+    monkeypatch.setattr(
+        moderation_worker, "get_moderation_handler", lambda _content_type: TransactionCheckingHandler()
+    )
+    asyncio.run(moderation_worker.process_message(Message(request.id)))
+
+
+def test_malformed_kafka_record_is_terminally_handled(session_factory):
+    class MalformedMessage:
+        value = b"not-json"
+
+    # It returns normally, allowing main() to commit this poison-pill offset.
+    asyncio.run(moderation_worker.process_message(MalformedMessage()))
+
+
+def test_unsupported_handler_is_terminal_failure(session_factory):
+    request = ModerationRequest(
+        tenant_id=uuid4(), content_type="unsupported", content="data", status="pending"
+    )
+    with session_factory.begin() as db:
+        db.add(request)
+
+    asyncio.run(moderation_worker.process_message(Message(request.id)))
+    with session_factory() as db:
+        stored = db.get(ModerationRequest, request.id)
+        assert (stored.status, stored.retry_count) == ("failed", 1)
+
+
+def test_postgresql_duplicate_workers_run_one_inference(
+    postgres_worker_session_factory, monkeypatch
+):
+    """A live claim is observed across sessions, not only Python memory."""
+    factory = postgres_worker_session_factory
+    request = add_request(factory)
+    entered_inference = threading.Event()
+    release_inference = threading.Event()
+    calls = 0
+
+    class BlockingHandler:
+        def handle(self, _db, _request):
+            nonlocal calls
+            calls += 1
+            entered_inference.set()
+            assert release_inference.wait(timeout=5)
+            return {"is_flagged": False, "categories": [], "scores": {}, "model": "fake"}
+
+    monkeypatch.setattr(moderation_worker, "get_moderation_handler", lambda _type: BlockingHandler())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(lambda: asyncio.run(moderation_worker.process_message(Message(request.id))))
+        assert entered_inference.wait(timeout=5)
+        with pytest.raises(moderation_worker.RetriableProcessingError):
+            asyncio.run(moderation_worker.process_message(Message(request.id)))
+        release_inference.set()
+        first.result(timeout=5)
+
+    with factory() as db:
+        assert db.get(ModerationRequest, request.id).status == "approved"
+        assert db.scalar(select(func.count()).select_from(ModerationResult)) == 1
+    assert calls == 1
 
 
 def test_result_retrieval_not_found_and_tenant_isolation(session_factory):
