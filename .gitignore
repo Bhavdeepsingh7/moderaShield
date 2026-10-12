@@ -103,6 +103,9 @@ alembic/versions/__pycache__/
 *.swp
 *.swo
 storage/
+# Application source package, not runtime object storage.
+!services/api-gateway/app/services/storage/
+!services/api-gateway/app/services/storage/*.py
 
 # ===========================
 # Secrets

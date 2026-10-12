@@ -17,6 +17,14 @@ class Settings(BaseSettings):
 
     STORAGE_PROVIDER: str = "local"
     STORAGE_ROOT: str = "./storage"
+    S3_BUCKET: str | None = None
+    S3_REGION: str | None = None
+    S3_ENDPOINT_URL: str | None = None
+    S3_ACCESS_KEY_ID: str | None = None
+    S3_SECRET_ACCESS_KEY: str | None = None
+    S3_CONNECT_TIMEOUT_SECONDS: int = 5
+    S3_READ_TIMEOUT_SECONDS: int = 60
+    S3_SERVER_SIDE_ENCRYPTION: str | None = None
     # This is intentionally configurable; deployments should set a limit suited
     # to their reverse proxy and storage provider.
     MAX_MEDIA_SIZE_BYTES: int = 104_857_600

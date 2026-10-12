@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.messaging.topics import MODERATION_REQUESTS_TOPIC
 from app.models.moderation import ModerationRequest
 from app.models.moderation_result import ModerationResult
+import app.db.models
 from app.services.webhook_service import create_deliveries_for_request
 from app.services.inference.registry import get_moderation_handler
 from app.services.media.exceptions import NonRetriableProcessingError

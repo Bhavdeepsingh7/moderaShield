@@ -12,4 +12,9 @@ def test_local_storage_provider():
 
 def test_unknown_storage_provider():
     with pytest.raises(ValueError, match="Unsupported storage provider"):
+        get_storage_service("unknown")
+
+
+def test_s3_provider_requires_its_configuration():
+    with pytest.raises(ValueError, match="S3_BUCKET"):
         get_storage_service("s3")

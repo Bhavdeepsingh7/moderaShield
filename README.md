@@ -104,6 +104,12 @@ Webhook Delivery (asynchronous tenant notification)
 - 408, 429, 5xx and network failures retry with bounded exponential backoff and deterministic jitter; other 4xx responses are terminal. Redirects are disabled. Every destination hostname is resolved before use and non-public addresses are rejected. Network egress controls remain necessary to close the DNS-rebinding race between resolution and connection.
 - Requests include JSON content type, event ID/type, timestamp, and an HMAC-SHA256 signature. Payloads are size-bounded; logs omit secrets and payload bodies.
 
+### Object Storage (Phase 6.6)
+- Development uses `STORAGE_PROVIDER=local` and `STORAGE_ROOT=./storage`. Production may use `STORAGE_PROVIDER=s3` with `S3_BUCKET`, optional `S3_REGION`, `S3_ENDPOINT_URL` (for compatible providers), `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY`. Supply credentials through environment or secret management only.
+- S3 objects remain private: workers access them through the storage abstraction, never public/signed URLs. Uploads stream to object storage and downloads return a file-like streaming body. `S3_SERVER_SIDE_ENCRYPTION` optionally requests provider-managed encryption.
+- Asset metadata, tenant ID, key, MIME type, size, and checksum stay in PostgreSQL. Generated keys are tenant-scoped (`<tenant-id>/<uuid>.<ext>`); AssetResolver verifies tenant ownership before reads.
+- Upload failures leave no asset record; `MediaService` best-effort deletes an uploaded object if subsequent ingestion fails. A separate orphan reconciler is intentionally out of scope. Configure bucket lifecycle policies for the product's 30-day retention target; the application does not silently delete media.
+
 ### Data Confidentiality
 - Raw media bytes are never persisted in PostgreSQL, Kafka event payloads, outbox events, application logs, or webhook delivery payloads.
 
