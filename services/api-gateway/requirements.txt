@@ -33,3 +33,4 @@ torch
 transformers
 huggingface_hub
 numpy
+python-multipart
