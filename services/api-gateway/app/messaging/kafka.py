@@ -14,11 +14,16 @@ logger = logging.getLogger(__name__)
 kafka_producer: AIOKafkaProducer | None = None
 
 
+
 def kafka_connection_config() -> dict:
     config = {
         "bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS,
         "security_protocol": settings.KAFKA_SECURITY_PROTOCOL,
     }
+
+    if settings.KAFKA_SECURITY_PROTOCOL == "SASL_SSL":
+        import ssl
+        config["ssl_context"] = ssl.create_default_context()
 
     if settings.KAFKA_SECURITY_PROTOCOL in {"SASL_SSL", "SASL_PLAINTEXT"}:
         config.update({
@@ -28,6 +33,7 @@ def kafka_connection_config() -> dict:
         })
 
     return config
+
 
 
 
