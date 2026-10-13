@@ -14,10 +14,27 @@ logger = logging.getLogger(__name__)
 kafka_producer: AIOKafkaProducer | None = None
 
 
+def kafka_connection_config() -> dict:
+    config = {
+        "bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS,
+        "security_protocol": settings.KAFKA_SECURITY_PROTOCOL,
+    }
+
+    if settings.KAFKA_SECURITY_PROTOCOL in {"SASL_SSL", "SASL_PLAINTEXT"}:
+        config.update({
+            "sasl_mechanism": settings.KAFKA_SASL_MECHANISM,
+            "sasl_plain_username": settings.KAFKA_SASL_USERNAME,
+            "sasl_plain_password": settings.KAFKA_SASL_PASSWORD,
+        })
+
+    return config
+
+
+
 async def ensure_moderation_requests_topic() -> None:
     """Create the moderation request topic when it is not already present."""
     admin = AIOKafkaAdminClient(
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+        **kafka_connection_config()
     )
 
     await admin.start()
@@ -44,7 +61,7 @@ async def start_kafka() -> None:
     await ensure_moderation_requests_topic()
 
     kafka_producer = AIOKafkaProducer(
-        bootstrap_servers = settings.KAFKA_BOOTSTRAP_SERVERS,
+        **kafka_connection_config()
     )
 
     await kafka_producer.start()
@@ -84,7 +101,7 @@ async def create_consumer(topic: str, group_id: str, **consumer_options):
 
     consumer = AIOKafkaConsumer(
         topic,
-        bootstrap_servers= settings.KAFKA_BOOTSTRAP_SERVERS,
+        **kafka_connection_config(),
         group_id=group_id,
         auto_offset_reset ="earliest",
         enable_auto_commit=False,

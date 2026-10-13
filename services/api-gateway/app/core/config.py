@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS: int = 2
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
+    
+    KAFKA_SECURITY_PROTOCOL: str = "PLAINTEXT"
+    KAFKA_SASL_MECHANISM: str = "SCRAM-SHA-256"
+    KAFKA_SASL_USERNAME: str | None = None
+    KAFKA_SASL_PASSWORD: str | None = None
+
+
     model_config = SettingsConfigDict(
         env_file = ".env",
         extra = "ignore"
