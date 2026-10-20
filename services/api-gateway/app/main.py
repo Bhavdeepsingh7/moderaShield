@@ -11,6 +11,7 @@ from app.api.v1.router import router as api_router
 from app.messaging.kafka import start_kafka, stop_kafka
 
 from app.services.rate_limiter import RateLimiter
+from app.services.api_key_cache import api_key_authentication_cache
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
     yield
 
     await app.state.rate_limiter.close()
+    api_key_authentication_cache.close()
 
     await stop_kafka()
 

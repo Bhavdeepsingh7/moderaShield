@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 os.environ["DATABASE_URL"] = "sqlite://"
 
 import pytest
+import fakeredis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -18,6 +19,18 @@ from app.dependencies.database import get_db
 from app.models.api_key import ApiKey
 from app.models.moderation import ModerationRequest
 from app.models.tenant import Tenant
+from app.services.api_key_cache import api_key_authentication_cache
+
+
+@pytest.fixture(autouse=True)
+def isolated_api_key_cache():
+    """Keep auth-cache state out of other tests and avoid a live Redis server."""
+    previous_client = api_key_authentication_cache._client
+    api_key_authentication_cache._client = fakeredis.FakeRedis(decode_responses=True)
+    try:
+        yield api_key_authentication_cache._client
+    finally:
+        api_key_authentication_cache._client = previous_client
 
 
 @pytest.fixture
@@ -120,3 +133,94 @@ def test_tenant_cannot_retrieve_another_tenants_request(client_and_session):
         headers={"X-API-Key": "msk_tenant_a"},
     )
     assert response.status_code == 404
+
+
+def test_valid_api_key_cache_hit_avoids_authentication_queries(client_and_session, monkeypatch):
+    client, factory = client_and_session
+    create_tenant_key(factory, raw_key="msk_cached")
+
+    first = client.post(
+        "/api/v1/moderate/",
+        headers={"X-API-Key": "msk_cached"},
+        json={"content_type": "text", "content": "first"},
+    )
+    assert first.status_code == 201
+
+    import app.dependencies.auth as auth
+
+    monkeypatch.setattr(
+        auth.api_key_repository,
+        "get_by_hash",
+        lambda *_: pytest.fail("API-key query ran on a cache hit"),
+    )
+    monkeypatch.setattr(
+        auth.tenant_repository,
+        "get_by_id",
+        lambda *_: pytest.fail("Tenant query ran on a cache hit"),
+    )
+    second = client.post(
+        "/api/v1/moderate/",
+        headers={"X-API-Key": "msk_cached"},
+        json={"content_type": "text", "content": "second"},
+    )
+    assert second.status_code == 201
+
+
+@pytest.mark.parametrize("change", ["revoked", "disabled", "rotated", "deleted"])
+def test_cache_invalidation_prevents_changed_key_authentication(client_and_session, change):
+    client, factory = client_and_session
+    tenant = create_tenant_key(factory, raw_key="msk_rotated")
+    headers = {"X-API-Key": "msk_rotated"}
+    assert client.post("/api/v1/moderate/", headers=headers, json={"content_type": "text", "content": "one"}).status_code == 201
+
+    with factory.begin() as db:
+        key = db.query(ApiKey).filter(ApiKey.tenant_id == tenant.id).one()
+        key_hash = key.key_hash
+        if change == "deleted":
+            db.delete(key)
+        elif change in {"revoked", "disabled"}:
+            # The current schema represents revocation by deactivation.
+            key.is_active = False
+        else:
+            key.key_hash = hash_api_key("msk_replacement")
+    api_key_authentication_cache.invalidate(key_hash)
+
+    response = client.post("/api/v1/moderate/", headers=headers, json={"content_type": "text", "content": "two"})
+    assert response.status_code == 401
+
+
+def test_expired_cache_entry_falls_back_to_database(client_and_session, isolated_api_key_cache):
+    client, factory = client_and_session
+    create_tenant_key(factory, raw_key="msk_expired")
+    headers = {"X-API-Key": "msk_expired"}
+    assert client.post("/api/v1/moderate/", headers=headers, json={"content_type": "text", "content": "one"}).status_code == 201
+
+    key_hash = hash_api_key("msk_expired")
+    cache_key = api_key_authentication_cache.cache_key(key_hash)
+    # Redis removes expired keys before get(); deleting here simulates that
+    # post-expiry state without sleeping in the test suite.
+    isolated_api_key_cache.delete(cache_key)
+    assert isolated_api_key_cache.get(cache_key) is None
+    assert client.post("/api/v1/moderate/", headers=headers, json={"content_type": "text", "content": "two"}).status_code == 201
+
+
+def test_redis_timeout_falls_back_to_database(client_and_session, monkeypatch):
+    client, factory = client_and_session
+    create_tenant_key(factory, raw_key="msk_redis_timeout")
+
+    class TimeoutRedis:
+        def get(self, _key):
+            import redis
+            raise redis.TimeoutError("timed out")
+
+        def set(self, *_args, **_kwargs):
+            import redis
+            raise redis.TimeoutError("timed out")
+
+    monkeypatch.setattr(api_key_authentication_cache, "_client", TimeoutRedis())
+    response = client.post(
+        "/api/v1/moderate/",
+        headers={"X-API-Key": "msk_redis_timeout"},
+        json={"content_type": "text", "content": "still works"},
+    )
+    assert response.status_code == 201

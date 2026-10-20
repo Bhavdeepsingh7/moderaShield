@@ -71,6 +71,13 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Authentication is on the synchronous request path, so its Redis client
+    # has independent, deliberately short timeouts.  Redis is an optimisation:
+    # a timeout must fall back to PostgreSQL rather than deny a valid request.
+    API_KEY_CACHE_TTL_SECONDS: int = 60
+    API_KEY_CACHE_SOCKET_TIMEOUT_SECONDS: float = 0.1
+    API_KEY_CACHE_SOCKET_CONNECT_TIMEOUT_SECONDS: float = 0.1
+
     RATE_LIMIT_REQUESTS: int = 3480
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
