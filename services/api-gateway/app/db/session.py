@@ -5,7 +5,7 @@ from app.core.config import settings
 
 engine = create_engine(
     settings.DATABASE_URL,
-    echo=(settings.ENVIRONMENT == "development")
+    echo=(settings.ENVIRONMENT == "development"),
     pool_size=5,
     max_overflow=5,
     pool_timeout=10,
