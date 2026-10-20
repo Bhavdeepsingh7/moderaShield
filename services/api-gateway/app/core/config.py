@@ -71,7 +71,7 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    RATE_LIMIT_REQUESTS: int = 300
+    RATE_LIMIT_REQUESTS: int = 3480
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
     
